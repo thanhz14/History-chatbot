@@ -1,65 +1,50 @@
 from flask import Flask, request, jsonify, render_template
-import spacy
+from pyvi import ViTokenizer
+import unicodedata
 import json
 
-# Tải mô hình spaCy (tiếng Anh ở đây, có thể thay bằng tiếng Việt)
-nlp = spacy.load("en_core_web_sm")  # Hoặc vi_core_news_lg cho tiếng Việt
+app = Flask(__name__)
 
-## Tải dữ liệu lịch sử
-def load_history_data(file_name="lich_su_partial.json"):
+# Load dữ liệu lịch sử
+def load_history_data(file_name="english_history_partial.json"):
     try:
         with open(file_name, "r", encoding="utf-8") as f:
-            history_data = json.load(f)
-        return history_data
+            return json.load(f)
     except FileNotFoundError:
         return {}
 
-# Hàm nhận diện thực thể trong câu hỏi
-def extract_entity_from_question(question):
-    doc = nlp(question)
-    entities = []
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            entities.append(ent.text)
-    return entities
+# Chuẩn hóa văn bản
+def normalize_text(text):
+    return unicodedata.normalize('NFKC', text).lower()
 
-# Hàm trả lời câu hỏi dựa trên dữ liệu lịch sử
+# Trích xuất thực thể
+def extract_entity_from_question(question, known_entities):
+    question_norm = normalize_text(ViTokenizer.tokenize(question))
+    return [entity for entity in known_entities if normalize_text(entity) in question_norm]
+
+# Trả lời câu hỏi
 def answer_question(question, history_data):
-    entities = extract_entity_from_question(question)
-    
+    entities = extract_entity_from_question(question, history_data.keys())
     if not entities:
-        return "Xin lỗi, tôi không nhận diện được tên người trong câu hỏi."
+        return " Xin lỗi, tôi không nhận diện được thực thể nào trong câu hỏi."
+    answers = [f" {entity}:\n{history_data[entity]}" for entity in entities if entity in history_data]
+    return "\n\n".join(answers) if answers else " Xin lỗi, tôi chưa có thông tin về thực thể này."
 
-    for entity in entities:
-        if entity in history_data:
-            return history_data[entity]
-    
-    return "Xin lỗi, tôi chưa có thông tin về câu hỏi này."
-
-# Khởi tạo ứng dụng Flask
-app = Flask(__name__)
-
-# Dữ liệu lịch sử
+# Nạp dữ liệu
 history_data = load_history_data()
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+    return render_template('index.html')  # Dùng template bạn đã có
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    # Lấy câu hỏi từ người dùng
     data = request.get_json()
     question = data.get('question', '')
-    
-    if question.lower() == 'thoát':
+    if question.lower().strip() == 'thoát':
         return jsonify({"response": "Tạm biệt!"})
-    
-    # Trả lời câu hỏi
     answer = answer_question(question, history_data)
-    
     return jsonify({"response": answer})
 
-# Chạy ứng dụng
 if __name__ == '__main__':
     app.run(debug=True)
